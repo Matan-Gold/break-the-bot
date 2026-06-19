@@ -126,13 +126,24 @@ RTL_CSS = """
 [data-testid="stSidebar"] p, [data-testid="stSidebar"] li {
     text-align: right;
 }
-[data-testid="stChatMessage"] {
+[data-testid="stChatMessage"],
+[data-testid="stChatInput"],
+[data-testid="stExpander"],
+[data-testid="stAlert"] {
     direction: rtl;
     text-align: right;
 }
 [data-testid="stChatInput"] textarea {
     direction: rtl;
     text-align: right;
+}
+/* במסכי טלפון: פחות שוליים, ניצול מלא של הרוחב */
+@media (max-width: 640px) {
+    .block-container {
+        padding-top: 1.5rem;
+        padding-left: 0.8rem;
+        padding-right: 0.8rem;
+    }
 }
 </style>
 """
@@ -148,18 +159,22 @@ def main() -> None:
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    with st.sidebar:
-        st.header("🎯 המשימות שלכם")
+    # המשימות בגוף העמוד — נראות גם בטלפון בלי לפתוח את התפריט הצדדי
+    with st.expander("🎯 המשימות שלכם", expanded=True):
         st.caption(
             '"פרומפט" = ההודעה שכותבים לבוט. נסחו אותה בחוכמה — '
             "שכנוע, תחבולות ומשחקי תפקידים מותרים 😏"
         )
         for challenge in CHALLENGES:
             st.info(challenge)
-        if st.button("🔄 התחל מחדש"):
-            st.session_state.messages = []
-            st.rerun()
-        with st.expander("🔧 מצב מנחה"):
+
+    if st.button("🔄 התחל מחדש"):
+        st.session_state.messages = []
+        st.rerun()
+
+    # מצב מנחה נשאר בתפריט הצדדי — לחשיפה בזמן הסיכום
+    with st.sidebar:
+        with st.expander("🔧 מצב מנחה", expanded=False):
             st.markdown("ההוראות הנסתרות שהבוט קיבל:")
             st.markdown(
                 "<div dir='rtl' style='background:#f0f2f6;color:#111;"
