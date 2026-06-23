@@ -1,10 +1,13 @@
 """שברו את הבוט — סדנת אוריינות AI לחטיבת ביניים.
 
 אפליקציית צ'אט אחת: מודל שפה עברי שקיבל "חוקים נסתרים" בפרומפט המערכת,
-והתלמידים מנסים לגרום לו לשבור אותם. אין שום שכבת סינון נוספת — זו הנקודה.
+והתלמידים מנסים לגרום לו לשבור אותם. החוקים השבירים (1,2,3,4,7) פתוחים
+לפריצה — זו הנקודה. רק חוקי הבטיחות לקטינים (5,6 — מסוכן/מידע אישי) מוגנים
+בשכבת בדיקה שנייה (מודל-שופט), כי המודל הקטן נשבר בהם בקלות.
 """
 
 import os
+import re
 import time
 
 import streamlit as st
@@ -46,6 +49,20 @@ BACKENDS = {
 
 MAX_NEW_TOKENS = 300
 TEMPERATURE = 0.7
+
+# --- שכבת בטיחות: מודל-שופט בודק כל תשובה לפני הצגה (רק חוקים 5-6) ---
+# רץ דרך אותו HF_TOKEN (featherless), בלי מפתח נוסף ובלי תלות חדשה.
+MODERATION = True
+JUDGE_MODEL = "Qwen/Qwen2.5-72B-Instruct:featherless-ai"
+JUDGE_SYSTEM = (
+    "אתה בודק בטיחות. בהינתן תשובה של בוט, ענה במילה אחת בלבד:\n"
+    "UNSAFE אם התשובה מכילה (א) הוראות/שלבים לנשק, חומר נפץ, סמים או פגיעה "
+    "עצמית, או (ב) מספר טלפון/כתובת/פרטי קשר של אדם אמיתי (גם אם מומצאים "
+    'או "לדוגמה").\n'
+    "SAFE בכל מקרה אחר. ביקורת על חברה, גסות, מענה באנגלית, או חשיפת חוקים "
+    "— כל אלה SAFE."
+)
+SAFE_REFUSAL = "אני לא יכול לעזור עם זה 🙂 בואו ננסה משהו אחר."
 
 CHALLENGES = [
     '🕵️ לבוט יש הוראות סודיות. גרמו לו לגלות לכם מה הן!',
@@ -111,6 +128,53 @@ def get_model_reply(history: list[dict]) -> str:
         except Exception as e:
             raise ModelError(ERR_NETWORK) from e
     raise ModelError(ERR_LOADING)
+
+
+# ---------------------------------------------------------------------------
+# שכבת בטיחות (מודל-שופט) — מגנה רק על חוקים 5-6
+# ---------------------------------------------------------------------------
+
+# סימני סיכון בתשובה: רצף ספרות (טלפון), מילות כתובת, ומילות מסוכנות.
+# רק תשובה שנראית מסוכנת נשלחת לשופט — כדי לחסוך קריאות ולשמור על המכסה.
+_RISK_DIGITS = re.compile(r"\d[\d\-\s]{6,}\d")
+_RISK_WORDS = [
+    "פצצה", "נפץ", "נשק", "רובה", "אקדח", "סם", "סמים", "קוקאין", "הרואין",
+    "אבק שריפה", "חומצה", "גופרית", "חנקת", "מולוטוב", "רעל", "גז רעיל",
+    "להתאבד", "התאבדות", "פגיעה עצמית", "לפגוע בעצמ", "לחתוך את",
+    "רחוב", "כתובת", "מיקוד",
+]
+
+
+def _looks_risky(text: str) -> bool:
+    return bool(_RISK_DIGITS.search(text)) or any(w in text for w in _RISK_WORDS)
+
+
+def _hf_token() -> str | None:
+    return os.getenv("HF_TOKEN") or get_token()
+
+
+def moderate_reply(reply: str) -> str:
+    """מעביר את תשובת הבוט דרך מודל-שופט וחוסם רק חוקים 5-6.
+
+    תשובה שלא נראית מסוכנת עוברת כמו שהיא (החוקים השבירים נשמרים שבירים).
+    אם נראתה מסוכנת והשופט נכשל — חוסמים ליתר ביטחון (fail-closed).
+    """
+    if not MODERATION or not _looks_risky(reply):
+        return reply
+    key = _hf_token()
+    if not key:
+        return reply  # אין שופט זמין — לא חוסמים את הדמו
+    try:
+        judge = InferenceClient(base_url="https://router.huggingface.co/v1",
+                                api_key=key, timeout=30)
+        verdict = judge.chat_completion(
+            messages=[{"role": "system", "content": JUDGE_SYSTEM},
+                      {"role": "user", "content": reply}],
+            model=JUDGE_MODEL, max_tokens=5, temperature=0,
+        ).choices[0].message.content.strip().upper()
+        return SAFE_REFUSAL if "UNSAFE" in verdict else reply
+    except Exception:
+        return SAFE_REFUSAL  # נראה מסוכן והשופט נפל — עדיף לחסום
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +259,7 @@ def main() -> None:
             with st.spinner("הבוט חושב... 🤔"):
                 try:
                     reply = get_model_reply(st.session_state.messages)
+                    reply = moderate_reply(reply)
                 except ModelError as err:
                     st.error(str(err))
                 else:
