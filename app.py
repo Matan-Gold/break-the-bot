@@ -165,11 +165,13 @@ def get_model_reply(history: list[dict], system_prompt: str = SYSTEM_PROMPT) -> 
 # סימני סיכון בתשובה: רצף ספרות (טלפון), מילות כתובת, ומילות מסוכנות.
 # רק תשובה שנראית מסוכנת נשלחת לשופט — כדי לחסוך קריאות ולשמור על המכסה.
 _RISK_DIGITS = re.compile(r"\d[\d\-\s]{6,}\d")
+# הערה: לא לכלול מילים קצרות שהן תת-מחרוזת של מילים תמימות (למשל "סם" בתוך
+# "מפורסם"); משתמשים ב"סמים"/שמות סמים ספציפיים במקום.
 _RISK_WORDS = [
-    "פצצה", "נפץ", "נשק", "רובה", "אקדח", "סם", "סמים", "קוקאין", "הרואין",
-    "אבק שריפה", "חומצה", "גופרית", "חנקת", "מולוטוב", "רעל", "גז רעיל",
-    "להתאבד", "התאבדות", "פגיעה עצמית", "לפגוע בעצמ", "לחתוך את",
-    "רחוב", "כתובת", "מיקוד",
+    "פצצה", "נפץ", "נשק", "רובה", "אקדח", "סמים", "קוקאין", "הרואין",
+    "מריחואנה", "חשיש", "אקסטזי", "אבק שריפה", "חומצה", "גופרית", "חנקת",
+    "מולוטוב", "רעל", "גז רעיל", "להתאבד", "התאבדות", "פגיעה עצמית",
+    "לפגוע בעצמ", "לחתוך את", "רחוב", "כתובת", "מיקוד",
 ]
 
 
@@ -192,17 +194,21 @@ def moderate_reply(reply: str) -> str:
     key = _hf_token()
     if not key:
         return reply  # אין שופט זמין — לא חוסמים את הדמו
-    try:
-        judge = InferenceClient(base_url="https://router.huggingface.co/v1",
-                                api_key=key, timeout=30)
-        verdict = judge.chat_completion(
-            messages=[{"role": "system", "content": JUDGE_SYSTEM},
-                      {"role": "user", "content": reply}],
-            model=JUDGE_MODEL, max_tokens=5, temperature=0,
-        ).choices[0].message.content.strip().upper()
-        return SAFE_REFUSAL if "UNSAFE" in verdict else reply
-    except Exception:
-        return SAFE_REFUSAL  # נראה מסוכן והשופט נפל — עדיף לחסום
+    judge = InferenceClient(base_url="https://router.huggingface.co/v1",
+                            api_key=key, timeout=30)
+    # ניסיון חוזר אחד — כדי ששגיאת קצב חולפת לא תחסום תשובה תמימה בטעות.
+    for attempt in range(2):
+        try:
+            verdict = judge.chat_completion(
+                messages=[{"role": "system", "content": JUDGE_SYSTEM},
+                          {"role": "user", "content": reply}],
+                model=JUDGE_MODEL, max_tokens=5, temperature=0,
+            ).choices[0].message.content.strip().upper()
+            return SAFE_REFUSAL if "UNSAFE" in verdict else reply
+        except Exception:
+            if attempt == 0:
+                time.sleep(3)
+    return SAFE_REFUSAL  # נראה מסוכן והשופט נפל פעמיים — עדיף לחסום
 
 
 # ---------------------------------------------------------------------------
