@@ -248,27 +248,38 @@ RTL_CSS = """
 
 
 def main() -> None:
-    st.set_page_config(page_title="שברו את הבוט 🔴", page_icon="🔴")
+    # FORCE_LEVEL נועל את ה-Space לרמה אחת (לפריסת שני Spaces נפרדים).
+    forced = os.getenv("FORCE_LEVEL")
+    forced_level = int(forced) if forced in ("1", "2") else None
+
+    title = "שברו את הבוט 🔴"
+    if forced_level:
+        title += f" — {LEVELS[forced_level]['label']}"
+    st.set_page_config(page_title=title, page_icon="🔴")
     st.markdown(RTL_CSS, unsafe_allow_html=True)
 
-    st.title("שברו את הבוט 🔴")
+    st.title(title)
     st.markdown("**זהו עוזר AI עם חוקים נסתרים. נסו לגרום לו לשבור אותם!**")
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # בורר רמת קושי — אותו מודל, פרומפט מוקשח יותר ברמה 2
-    level = st.radio(
-        "רמת קושי:",
-        list(LEVELS.keys()),
-        format_func=lambda lvl: LEVELS[lvl]["label"],
-        horizontal=True,
-        key="level",
-    )
-    if st.session_state.get("_active_level") != level:
-        st.session_state.messages = []
-        st.session_state._active_level = level
-    st.caption(LEVELS[level]["hint"])
+    # רמת קושי: אם FORCE_LEVEL מוגדר (Space ייעודי) — נעולה; אחרת בורר.
+    if forced_level:
+        level = forced_level
+        st.caption(LEVELS[level]["hint"])
+    else:
+        level = st.radio(
+            "רמת קושי:",
+            list(LEVELS.keys()),
+            format_func=lambda lvl: LEVELS[lvl]["label"],
+            horizontal=True,
+            key="level",
+        )
+        if st.session_state.get("_active_level") != level:
+            st.session_state.messages = []
+            st.session_state._active_level = level
+        st.caption(LEVELS[level]["hint"])
 
     # המשימות בגוף העמוד — נראות גם בטלפון בלי לפתוח את התפריט הצדדי
     with st.expander("🎯 המשימות שלכם", expanded=True):
